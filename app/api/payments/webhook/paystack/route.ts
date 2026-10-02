@@ -1,87 +1,83 @@
-import { createHmac } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 
-import prisma from "@/lib/prisma";
+import { getSupabaseServiceClient } from "@/lib/supabase-server";
 
 export async function POST(request: Request) {
   try {
     const payload = await request.text();
     const signature = request.headers.get("x-paystack-signature") ?? "";
     const secret = process.env.PAYSTACK_SECRET_KEY;
-
     if (!secret) {
       return NextResponse.json({ success: false, message: "Paystack secret missing." }, { status: 500 });
     }
 
-    const expectedSignature = createHmac("sha512", secret).update(payload).digest("hex");
-
-    if (signature !== expectedSignature) {
+    const expected = createHmac("sha512", secret).update(payload).digest("hex");
+    const signatureBuffer = Buffer.from(signature);
+    const expectedBuffer = Buffer.from(expected);
+    if (
+      signatureBuffer.length !== expectedBuffer.length ||
+      !timingSafeEqual(signatureBuffer, expectedBuffer)
+    ) {
       return NextResponse.json({ success: false, message: "Invalid webhook signature." }, { status: 401 });
     }
 
     const eventPayload = JSON.parse(payload);
-    const event = eventPayload.event;
-
-    if (!event || event !== "charge.success") {
+    if (eventPayload.event !== "charge.success") {
       return NextResponse.json({ success: true, ignored: true });
     }
 
-    const { reference, amount, metadata } = eventPayload.data;
-    const payment = await prisma.payment.findUnique({
-      where: { reference },
-      include: { invoice: true },
-    });
-
+    const { reference, amount, metadata, id } = eventPayload.data;
+    const supabase = getSupabaseServiceClient();
+    const { data: payment, error: paymentLookupError } = await supabase
+      .from("payments")
+      .select("*")
+      .eq("reference", reference)
+      .maybeSingle();
+    if (paymentLookupError) throw paymentLookupError;
     if (!payment) {
       return NextResponse.json({ success: true, ignored: true, message: "Unknown payment reference." });
     }
+    if (payment.status === "SUCCESS") return NextResponse.json({ success: true, idempotent: true });
 
-    if (payment.status === "SUCCESS") {
-      return NextResponse.json({ success: true, idempotent: true });
-    }
-
-    await prisma.payment.update({
-      where: { id: payment.id },
-      data: {
+    const paymentMetadata =
+      metadata && typeof metadata === "object"
+        ? metadata
+        : payment.metadata;
+    const { error: updatePaymentError } = await supabase
+      .from("payments")
+      .update({
         status: "SUCCESS",
-        providerRef: eventPayload.data.id ? String(eventPayload.data.id) : null,
-        webhookEvent: event,
+        provider_ref: id ? String(id) : null,
+        webhook_event: eventPayload.event,
         amount: Number(amount) / 100,
-        metadata: metadata ? JSON.stringify(metadata) : payment.metadata,
-      },
-    });
+        metadata: paymentMetadata,
+      })
+      .eq("id", payment.id);
+    if (updatePaymentError) throw updatePaymentError;
 
-    let orderId: string | null = null;
-
-    if (metadata && typeof metadata === "object" && "orderId" in metadata) {
-      orderId = String((metadata as { orderId?: string }).orderId ?? null);
-    }
-
-    if (!orderId && payment.metadata) {
-      try {
-        const parsedMetadata = JSON.parse(payment.metadata);
-        orderId = parsedMetadata?.orderId ? String(parsedMetadata.orderId) : null;
-      } catch {
-        orderId = null;
-      }
-    }
-
+    const orderId =
+      paymentMetadata && typeof paymentMetadata === "object" && "orderId" in paymentMetadata
+        ? String(paymentMetadata.orderId)
+        : null;
     if (orderId) {
-      await prisma.order.update({
-        where: { id: String(orderId) },
-        data: { status: "PAID" },
-      });
+      const { error: orderError } = await supabase
+        .from("orders")
+        .update({ status: "paid", payment_status: "paid" })
+        .eq("id", orderId);
+      if (orderError) throw orderError;
 
-      const invoice = await prisma.invoice.findFirst({
-        where: { orderId: String(orderId) },
-      });
-
-      if (invoice) {
-        await prisma.invoice.update({
-          where: { id: invoice.id },
-          data: { status: "PAID" },
-        });
-      }
+      const { error: invoiceError } = await supabase
+        .from("invoices")
+        .update({ status: "PAID" })
+        .eq("order_id", orderId);
+      if (invoiceError) throw invoiceError;
+    } else {
+      const { error: invoiceError } = await supabase
+        .from("invoices")
+        .update({ status: "PAID" })
+        .eq("id", payment.invoice_id);
+      if (invoiceError) throw invoiceError;
     }
 
     return NextResponse.json({ success: true, processed: true });

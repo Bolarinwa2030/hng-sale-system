@@ -10,6 +10,7 @@ export default function RegisterPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [form, setForm] = useState({
     firstName: "",
     lastName: "",
@@ -51,6 +52,7 @@ export default function RegisterPage() {
     event.preventDefault();
     setLoading(true);
     setError("");
+    setSuccess("");
 
     try {
       const response = await fetch("/api/auth/register", {
@@ -67,7 +69,14 @@ export default function RegisterPage() {
         throw new Error(data.message ?? "Registration failed.");
       }
 
-      router.push("/login");
+      if (data.session) {
+        const client = createBrowserSupabaseClient();
+        const { error: sessionError } = await client.auth.setSession(data.session);
+        if (sessionError) throw sessionError;
+        router.push("/");
+      } else {
+        setSuccess("Account created. Check your email to confirm your account, then sign in.");
+      }
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Registration failed.");
     } finally {
@@ -190,6 +199,7 @@ export default function RegisterPage() {
             </form>
 
             {error ? <p className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
+            {success ? <p className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{success}</p> : null}
 
             <div className="my-6 flex items-center gap-4">
               <div className="h-px flex-1 bg-slate-200" />

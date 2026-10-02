@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { clearToken, getStoredToken } from "@/lib/client-auth";
+import { getAuthHeaders } from "@/lib/client-auth";
+import { createBrowserSupabaseClient, hasSupabaseConfiguration } from "@/lib/supabase";
 
 type DashboardSummary = {
   totalSales: number;
@@ -32,19 +33,16 @@ export default function DashboardPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const token = getStoredToken();
-
-    if (!token) {
-      router.push("/");
-      return;
-    }
-
     async function loadSummary() {
       try {
+        const headers = await getAuthHeaders();
+        if (!headers.Authorization) {
+          router.push("/login");
+          return;
+        }
+
         const response = await fetch("/api/reports", {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+          headers,
         });
 
         if (!response.ok) {
@@ -63,9 +61,16 @@ export default function DashboardPage() {
     loadSummary();
   }, [router]);
 
-  function handleLogout() {
-    clearToken();
-    router.push("/");
+  async function handleLogout() {
+    try {
+      if (hasSupabaseConfiguration()) {
+        const { error: signOutError } = await createBrowserSupabaseClient().auth.signOut();
+        if (signOutError) throw signOutError;
+      }
+      router.push("/");
+    } catch (logoutError) {
+      setError(logoutError instanceof Error ? logoutError.message : "Unable to sign out.");
+    }
   }
 
   const stats = summary

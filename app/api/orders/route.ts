@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getSupabaseServiceClient } from "@/lib/supabase";
+import { getSupabaseServiceClient } from "@/lib/supabase-server";
 
 function getBearerToken(request: Request) {
   const header = request.headers.get("authorization") ?? "";
@@ -24,12 +24,11 @@ async function sendOrderConfirmationEmail(payload: {
   totalAmount: number;
   paymentStatus?: string;
 }) {
-  const apiKey = process.env.MAILGUN_API_KEY;
-  const domain = process.env.MAILGUN_DOMAIN;
-  const from = process.env.MAILGUN_FROM || `noreply@${domain || "mailgun.local"}`;
+  const apiKey = process.env.RESEND_API_KEY;
+  const from = process.env.RESEND_FROM;
 
-  if (!apiKey || !domain) {
-    return { sent: false, reason: "Mailgun is not configured." };
+  if (!apiKey || !from) {
+    return { sent: false, reason: "Resend is not configured." };
   }
 
   const itemRows = payload.items
@@ -80,27 +79,27 @@ async function sendOrderConfirmationEmail(payload: {
     </div>
   `;
 
-  const body = new URLSearchParams();
-  body.set("from", `Mariam Market <${from}>`);
-  body.set("to", payload.to);
-  body.set("subject", `Order confirmation: ${payload.orderNumber}`);
-  body.set("html", html);
-
-  const response = await fetch(`https://api.mailgun.net/v3/${domain}/messages`, {
+  const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
-      Authorization: `Basic ${Buffer.from(`api:${apiKey}`).toString("base64")}`,
-      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
     },
-    body: body.toString(),
+    body: JSON.stringify({
+      from,
+      to: [payload.to],
+      subject: `Order confirmation: ${payload.orderNumber}`,
+      html,
+    }),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Mailgun request failed: ${errorText}`);
+    throw new Error(`Resend request failed: ${errorText}`);
   }
 
-  return { sent: true };
+  const result: { id?: string } = await response.json();
+  return { sent: true, id: result.id };
 }
 
 export async function GET(request: Request) {

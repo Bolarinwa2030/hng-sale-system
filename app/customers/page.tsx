@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { getStoredToken } from "@/lib/client-auth";
+import { getAuthHeaders } from "@/lib/client-auth";
 
 type Customer = {
   id: string;
@@ -25,19 +25,16 @@ export default function CustomersPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const token = getStoredToken();
-
-    if (!token) {
-      router.push("/");
-      return;
-    }
-
     async function loadCustomers() {
       try {
+        const headers = await getAuthHeaders();
+        if (!headers.Authorization) {
+          router.push("/login");
+          return;
+        }
+
         const response = await fetch("/api/customers", {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+          headers,
         });
 
         const data = await response.json();

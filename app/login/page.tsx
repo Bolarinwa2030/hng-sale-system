@@ -1,13 +1,43 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { createBrowserSupabaseClient, getAuthRedirectUrl, hasSupabaseConfiguration } from "@/lib/supabase";
 
 export default function LoginPage() {
+  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [form, setForm] = useState({ email: "", password: "" });
+
+  async function handlePasswordSignIn(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoading(true);
+    setError("");
+
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.message ?? "Unable to sign in.");
+      }
+
+      const client = createBrowserSupabaseClient();
+      const { error: sessionError } = await client.auth.setSession(result.session);
+      if (sessionError) throw sessionError;
+      router.push("/dashboard");
+    } catch (signInError) {
+      setError(signInError instanceof Error ? signInError.message : "Unable to sign in.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function handleGoogleSignIn() {
     try {
@@ -72,14 +102,17 @@ export default function LoginPage() {
               <Link href="/" className="text-sm font-medium text-amber-600 hover:text-amber-500">Back to home</Link>
             </div>
 
-            <form className="space-y-5">
+            <form onSubmit={handlePasswordSignIn} className="space-y-5">
               <div>
                 <label htmlFor="email" className="mb-2 block text-sm font-medium text-slate-700">Email</label>
                 <input
                   id="email"
                   type="email"
+                  value={form.email}
+                  onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
                   placeholder="you@example.com"
                   className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-amber-500 focus:bg-white"
+                  required
                 />
               </div>
 
@@ -88,8 +121,11 @@ export default function LoginPage() {
                 <input
                   id="password"
                   type="password"
+                  value={form.password}
+                  onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
                   placeholder="Enter your password"
                   className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-amber-500 focus:bg-white"
+                  required
                 />
               </div>
 
@@ -103,9 +139,10 @@ export default function LoginPage() {
 
               <button
                 type="submit"
-                className="w-full rounded-2xl bg-amber-500 px-5 py-3.5 text-base font-semibold text-white shadow-sm transition hover:bg-amber-400"
+                disabled={loading}
+                className="w-full rounded-2xl bg-amber-500 px-5 py-3.5 text-base font-semibold text-white shadow-sm transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-70"
               >
-                Login
+                {loading ? "Signing in..." : "Login"}
               </button>
             </form>
 

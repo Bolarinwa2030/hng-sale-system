@@ -1,84 +1,69 @@
 import { NextResponse } from "next/server";
 
-import { verifyAccessToken } from "@/lib/auth";
-import prisma from "@/lib/prisma";
+import { getAuthenticatedUser } from "@/lib/server-auth";
 import { customerSchema } from "@/lib/validators/customer";
-
-function getBearerToken(request: Request) {
-  const header = request.headers.get("authorization") ?? "";
-  return header.startsWith("Bearer ") ? header.replace("Bearer ", "") : "";
-}
 
 export async function GET(request: Request) {
   try {
-    const token = getBearerToken(request);
-    if (!token) {
-      return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
-    }
+    const auth = await getAuthenticatedUser(request);
+    if (!auth) return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
 
-    await verifyAccessToken(token);
-
-    const customers = await prisma.customer.findMany({
-      orderBy: { createdAt: "desc" },
-      include: {
-        orders: true,
-      },
-    });
+    const { data, error } = await auth.supabase
+      .from("customers")
+      .select("*, orders(id)")
+      .order("created_at", { ascending: false });
+    if (error) throw error;
 
     return NextResponse.json({
       success: true,
-      customers: customers.map((customer) => ({
+      customers: (data ?? []).map(({ orders, ...customer }) => ({
         ...customer,
-        ordersCount: customer.orders.length,
+        customerCode: customer.customer_code,
+        companyName: customer.company_name,
+        customerType: customer.customer_type,
+        createdAt: customer.created_at,
+        ordersCount: orders.length,
       })),
     });
-  } catch {
-    return NextResponse.json({ success: false, message: "Invalid or expired token." }, { status: 401 });
+  } catch (error) {
+    console.error("Customer fetch failed:", error);
+    return NextResponse.json({ success: false, message: "Unable to load customers." }, { status: 500 });
   }
 }
 
 export async function POST(request: Request) {
   try {
-    const token = getBearerToken(request);
-    if (!token) {
-      return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
-    }
+    const auth = await getAuthenticatedUser(request);
+    if (!auth) return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
 
-    await verifyAccessToken(token);
-
-    const body = await request.json();
-    const parsed = customerSchema.safeParse(body);
-
+    const parsed = customerSchema.safeParse(await request.json());
     if (!parsed.success) {
       return NextResponse.json(
-        {
-          success: false,
-          message: "Validation failed",
-          errors: parsed.error.flatten(),
-        },
+        { success: false, message: "Validation failed", errors: parsed.error.flatten() },
         { status: 400 }
       );
     }
 
     const data = parsed.data;
-    const customerCode = `CUST-${Date.now()}-${Math.floor(Math.random() * 900 + 100)}`;
-
-    const customer = await prisma.customer.create({
-      data: {
-        customerCode,
+    const { data: customer, error } = await auth.supabase
+      .from("customers")
+      .insert({
+        customer_code: `CUST-${Date.now()}-${Math.floor(Math.random() * 900 + 100)}`,
         name: data.name,
         email: data.email || null,
         phone: data.phone || null,
         address: data.address || null,
-        companyName: data.companyName || null,
-        customerType: data.customerType || "INDIVIDUAL",
+        company_name: data.companyName || null,
+        customer_type: data.customerType || "INDIVIDUAL",
         notes: data.notes || null,
-        status: "ACTIVE",
-      },
-    });
+      })
+      .select()
+      .single();
+    if (error) throw error;
 
     return NextResponse.json({ success: true, customer }, { status: 201 });
-  } catch {
+  } catch (error) {
+    console.error("Customer creation failed:", error);
     return NextResponse.json({ success: false, message: "Failed to create customer." }, { status: 500 });
   }
 }

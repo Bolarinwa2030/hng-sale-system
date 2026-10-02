@@ -13,8 +13,8 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - Keep all external secrets in environment variables only. Never ship real keys or credentials to the repository.
 - Use Supabase Auth for Google sign-in and route users through the app after login.
 - Store orders with a user_id tied to auth.users.id.
-- Use server-side routes for checkout persistence and Mailgun email dispatch.
-- Keep Mailgun API keys and secret configuration out of the browser bundle.
+- Use server-side routes for checkout persistence and Resend email dispatch.
+- Keep Resend API keys and secret configuration out of the browser bundle.
 - Treat Paystack as optional for the storefront flow; do not block checkout on it.
 - The SQL migration file lives in [supabase/schema.sql](supabase/schema.sql).
 - Do not claim the external integrations are configured unless the real values are present in the environment and validated live.

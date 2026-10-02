@@ -1,108 +1,77 @@
 import { NextResponse } from "next/server";
 
-import { verifyAccessToken } from "@/lib/auth";
-import prisma from "@/lib/prisma";
+import { getAuthenticatedUser } from "@/lib/server-auth";
 import { inventoryAdjustmentSchema } from "@/lib/validators/payment";
-
-function getBearerToken(request: Request) {
-  const header = request.headers.get("authorization") ?? "";
-  return header.startsWith("Bearer ") ? header.replace("Bearer ", "") : "";
-}
 
 export async function GET(request: Request) {
   try {
-    const token = getBearerToken(request);
-    if (!token) {
-      return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
-    }
+    const auth = await getAuthenticatedUser(request);
+    if (!auth) return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
 
-    await verifyAccessToken(token);
-
-    const [transactions, products] = await Promise.all([
-      prisma.inventoryTransaction.findMany({
-        orderBy: { createdAt: "desc" },
-        include: { product: true },
-      }),
-      prisma.product.findMany({
-        orderBy: { stockQuantity: "asc" },
-      }),
-    ]);
+    const [{ data: transactions, error: transactionError }, { data: products, error: productError }] =
+      await Promise.all([
+        auth.supabase
+          .from("inventory_transactions")
+          .select("*, product:products(*)")
+          .order("created_at", { ascending: false }),
+        auth.supabase.from("products").select("*").order("stock_quantity", { ascending: true }),
+      ]);
+    if (transactionError) throw transactionError;
+    if (productError) throw productError;
 
     return NextResponse.json({
       success: true,
-      transactions,
-      lowStock: products.filter((product) => product.stockQuantity <= product.minStockLevel),
+      transactions: transactions ?? [],
+      lowStock: (products ?? []).filter((product) => product.stock_quantity <= product.min_stock_level),
     });
-  } catch {
-    return NextResponse.json({ success: false, message: "Invalid or expired token." }, { status: 401 });
+  } catch (error) {
+    console.error("Inventory fetch failed:", error);
+    return NextResponse.json({ success: false, message: "Unable to load inventory." }, { status: 500 });
   }
 }
 
 export async function POST(request: Request) {
   try {
-    const token = getBearerToken(request);
-    if (!token) {
-      return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
-    }
+    const auth = await getAuthenticatedUser(request);
+    if (!auth) return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
 
-    await verifyAccessToken(token);
-
-    const body = await request.json();
-    const parsed = inventoryAdjustmentSchema.safeParse(body);
-
+    const parsed = inventoryAdjustmentSchema.safeParse(await request.json());
     if (!parsed.success) {
       return NextResponse.json(
-        {
-          success: false,
-          message: "Validation failed",
-          errors: parsed.error.flatten(),
-        },
+        { success: false, message: "Validation failed", errors: parsed.error.flatten() },
         { status: 400 }
       );
     }
 
     const { productId, quantity, type, reason, reference } = parsed.data;
-
-    const product = await prisma.product.findUnique({
-      where: { id: productId },
+    const { data, error } = await auth.supabase.rpc("adjust_inventory_stock", {
+      p_product_id: productId,
+      p_quantity: quantity,
+      p_type: type,
+      p_reason: reason,
+      p_reference: reference || `${type}-${Date.now()}`,
     });
-
-    if (!product) {
+    if (error?.code === "P0002") {
       return NextResponse.json({ success: false, message: "Product not found." }, { status: 404 });
     }
-
-    let nextStock = product.stockQuantity;
-
-    if (type === "OUT" && product.stockQuantity < quantity) {
-      return NextResponse.json({ success: false, message: "Stock quantity is insufficient for this adjustment." }, { status: 400 });
+    if (error?.code === "23514") {
+      return NextResponse.json(
+        { success: false, message: "Stock quantity is insufficient for this adjustment." },
+        { status: 400 }
+      );
+    }
+    if (error) throw error;
+    if (!data || typeof data !== "object") {
+      throw new Error("Supabase returned an invalid inventory adjustment result.");
     }
 
-    if (type === "IN" || type === "ADJUSTMENT") {
-      nextStock = product.stockQuantity + quantity;
-    }
-
-    if (type === "OUT") {
-      nextStock = product.stockQuantity - quantity;
-    }
-
-    const [updatedProduct, transaction] = await Promise.all([
-      prisma.product.update({
-        where: { id: productId },
-        data: { stockQuantity: nextStock },
-      }),
-      prisma.inventoryTransaction.create({
-        data: {
-          productId,
-          type,
-          quantity,
-          reason,
-          reference: reference || `${type}-${Date.now()}`,
-        },
-      }),
-    ]);
-
-    return NextResponse.json({ success: true, product: updatedProduct, transaction });
-  } catch {
+    return NextResponse.json({
+      success: true,
+      product: data.product,
+      transaction: data.transaction,
+    });
+  } catch (error) {
+    console.error("Inventory adjustment failed:", error);
     return NextResponse.json({ success: false, message: "Failed to update inventory." }, { status: 500 });
   }
 }

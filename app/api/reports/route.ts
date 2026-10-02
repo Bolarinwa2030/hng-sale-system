@@ -1,54 +1,48 @@
 import { NextResponse } from "next/server";
 
-import { verifyAccessToken } from "@/lib/auth";
-import prisma from "@/lib/prisma";
-
-function getBearerToken(request: Request) {
-  const header = request.headers.get("authorization") ?? "";
-  return header.startsWith("Bearer ") ? header.replace("Bearer ", "") : "";
-}
+import { getAuthenticatedUser } from "@/lib/server-auth";
 
 export async function GET(request: Request) {
   try {
-    const token = getBearerToken(request);
-    if (!token) {
-      return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+    const auth = await getAuthenticatedUser(request);
+    if (!auth) return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+
+    const [ordersResult, invoicesResult, productsResult, paymentsResult] = await Promise.all([
+      auth.supabase.from("orders").select("*, customer:customers(name)").order("created_at", { ascending: false }),
+      auth.supabase.from("invoices").select("*"),
+      auth.supabase.from("products").select("*").order("stock_quantity", { ascending: true }),
+      auth.supabase.from("payments").select("*"),
+    ]);
+    for (const result of [ordersResult, invoicesResult, productsResult, paymentsResult]) {
+      if (result.error) throw result.error;
     }
 
-    await verifyAccessToken(token);
-
-    const [orders, invoices, products, payments] = await Promise.all([
-      prisma.order.findMany({ include: { customer: true } }),
-      prisma.invoice.findMany({ include: { customer: true } }),
-      prisma.product.findMany({ orderBy: { stockQuantity: "asc" } }),
-      prisma.payment.findMany({ include: { invoice: true } }),
-    ]);
-
-    const totalSales = orders.reduce((sum, order) => sum + Number(order.total), 0);
-    const paidInvoices = invoices.filter((invoice) => invoice.status === "PAID").length;
-    const overdueInvoices = invoices.filter((invoice) => invoice.status === "OVERDUE").length;
-    const totalPayments = payments.reduce((sum, payment) => sum + Number(payment.amount), 0);
-    const lowStock = products.filter((product) => product.stockQuantity <= product.minStockLevel);
+    const orders = ordersResult.data ?? [];
+    const invoices = invoicesResult.data ?? [];
+    const products = productsResult.data ?? [];
+    const payments = paymentsResult.data ?? [];
+    const lowStock = products.filter((product) => product.stock_quantity <= product.min_stock_level);
 
     return NextResponse.json({
       success: true,
       summary: {
-        totalSales,
-        paidInvoices,
-        overdueInvoices,
-        totalPayments,
+        totalSales: orders.reduce((sum, order) => sum + Number(order.total || order.total_amount), 0),
+        paidInvoices: invoices.filter((invoice) => invoice.status === "PAID").length,
+        overdueInvoices: invoices.filter((invoice) => invoice.status === "OVERDUE").length,
+        totalPayments: payments.reduce((sum, payment) => sum + Number(payment.amount), 0),
         lowStockCount: lowStock.length,
       },
       lowStock,
       recentOrders: orders.slice(0, 5).map((order) => ({
         id: order.id,
-        orderNumber: order.orderNumber,
-        customer: order.customer.name,
-        total: Number(order.total),
+        orderNumber: order.order_number,
+        customer: order.customer?.name ?? order.customer_name,
+        total: Number(order.total || order.total_amount),
         status: order.status,
       })),
     });
-  } catch {
-    return NextResponse.json({ success: false, message: "Invalid or expired token." }, { status: 401 });
+  } catch (error) {
+    console.error("Report generation failed:", error);
+    return NextResponse.json({ success: false, message: "Unable to load reports." }, { status: 500 });
   }
 }

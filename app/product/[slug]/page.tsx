@@ -3,9 +3,9 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { getProductBySlug, products, type ShopProduct } from "@/lib/shop-data";
+import type { ShopProduct } from "@/lib/shop-data";
 
 const CART_KEY = "mariam-market-cart";
 
@@ -24,15 +24,47 @@ function readCart(): Array<{ id: string; name: string; price: number; quantity: 
 
 export default function ProductDetailPage() {
   const params = useParams<{ slug: string }>();
-  const product = getProductBySlug(params.slug);
+  const [products, setProducts] = useState<ShopProduct[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const product = products.find((item) => item.slug === params.slug);
   const [quantity, setQuantity] = useState(1);
+  const relatedProducts = useMemo(
+    () => product
+      ? products.filter((item) => item.category === product.category && item.id !== product.id).slice(0, 4)
+      : [],
+    [product, products]
+  );
+
+  useEffect(() => {
+    async function loadProducts() {
+      try {
+        const response = await fetch("/api/products");
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+          throw new Error(result.message ?? "Unable to load product.");
+        }
+        setProducts(result.products ?? []);
+      } catch (error) {
+        setLoadError(error instanceof Error ? error.message : "Unable to load product.");
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadProducts();
+  }, []);
+
+  if (loading) {
+    return <main className="mx-auto max-w-5xl px-4 py-12 text-slate-600">Loading product...</main>;
+  }
 
   if (!product) {
     return (
       <main className="mx-auto max-w-5xl px-4 py-12 text-slate-900">
         <div className="rounded-3xl border border-slate-200 bg-white p-10 text-center shadow-sm">
-          <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Product not found</p>
-          <h1 className="mt-3 text-3xl font-bold">This item is no longer available.</h1>
+          <p className="text-sm uppercase tracking-[0.2em] text-slate-500">{loadError ? "Unable to load product" : "Product not found"}</p>
+          <h1 className="mt-3 text-3xl font-bold">{loadError || "This item is no longer available."}</h1>
           <Link href="/products" className="mt-6 inline-flex rounded-full bg-amber-500 px-5 py-3 text-sm font-semibold text-white hover:bg-amber-400">
             Browse products
           </Link>
@@ -40,11 +72,6 @@ export default function ProductDetailPage() {
       </main>
     );
   }
-
-  const relatedProducts = useMemo(
-    () => products.filter((item) => item.category === product.category && item.id !== product.id).slice(0, 4),
-    [product]
-  );
 
   function addToCart(selectedProduct: ShopProduct) {
     const current = readCart();

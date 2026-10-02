@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import { categories, featuredProducts, products } from "@/lib/shop-data";
+import { categories, type ShopProduct } from "@/lib/shop-data";
 import { createBrowserSupabaseClient, getAuthRedirectUrl, hasSupabaseConfiguration } from "@/lib/supabase";
 
 const CART_KEY = "mariam-market-cart";
@@ -49,6 +49,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(false);
   const [cartCount, setCartCount] = useState(0);
   const [message, setMessage] = useState("");
+  const [featuredProducts, setFeaturedProducts] = useState<ShopProduct[]>([]);
 
   useEffect(() => {
     async function syncSession() {
@@ -69,6 +70,18 @@ export default function HomePage() {
     }
 
     syncSession();
+
+    fetch("/api/products")
+      .then(async (response) => {
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+          throw new Error(result.message ?? "Unable to load products.");
+        }
+        setFeaturedProducts((result.products as ShopProduct[]).slice(0, 4));
+      })
+      .catch((error: unknown) => {
+        setMessage(error instanceof Error ? error.message : "Unable to load products.");
+      });
   }, []);
 
   async function handleGoogleSignIn() {
@@ -304,7 +317,7 @@ export default function HomePage() {
           </div>
 
           <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
-            {products.slice(0, 4).map((product) => (
+            {featuredProducts.slice(0, 4).map((product) => (
               <article key={product.id} className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="relative h-52 overflow-hidden rounded-[18px] bg-slate-100">
                   <Image src={product.image} alt={product.name} fill className="object-cover" sizes="(max-width: 768px) 100vw, 25vw" />

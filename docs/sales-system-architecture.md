@@ -48,7 +48,7 @@ The original brief covers the major modules, but a production system also needs:
 - Invoice generation and PDF/print capability
 - Payment tracking with Paystack integration
 - Webhook-driven status reconciliation
-- Email notifications via Mailgun abstraction
+- Email notifications via Resend
 - Dashboard analytics and filters
 - Audit logs
 - Basic reporting export
@@ -97,14 +97,13 @@ a non-essential complexity that would slow delivery
 ### Backend
 
 - Next.js server actions or route handlers for API endpoints
-- Prisma ORM for schema modeling and migrations
-- PostgreSQL as the production relational database
+- Supabase Database and Supabase Auth for application persistence and authentication
 - Redis for queueing and caching if background jobs are required
 
 ### Payments and communications
 
 - Paystack for primary payment processing
-- Mailgun as the default transactional email provider
+- Resend as the transactional email provider
 - provider abstraction layer for email and payment service switching
 
 ### DevOps and quality
@@ -138,13 +137,13 @@ Recommended layers:
 1. UI layer (Next.js pages and components)
 2. API layer (route handlers / server actions)
 3. Service layer (business logic)
-4. Data access layer (Prisma models)
-5. Integration adapters (Paystack, Mailgun)
+4. Data access layer (Supabase client and SQL schema)
+5. Integration adapters (Paystack, Resend)
 6. Jobs and notifications (async processing when needed)
 
 ## 7. Database design
 
-Use PostgreSQL with a normalized relational schema.
+Use the Supabase Database with a normalized relational schema. Supabase runs PostgreSQL as its managed database; the application uses the Supabase client and does not require a separate database URL.
 
 Core entities:
 
@@ -232,7 +231,7 @@ Email should be handled through an abstraction, not directly from controllers.
 Recommended provider abstraction:
 
 - EmailProvider interface
-- MailgunEmailProvider implementation
+- ResendEmailProvider implementation
 - mock/test provider for local development
 
 Use email for:
@@ -251,7 +250,7 @@ The system should treat security as a first-class feature.
 
 Required safeguards:
 
-- password hashing with bcrypt or Argon2
+- Supabase Auth for password hashing and account security
 - JWT or secure session management
 - role-based access control
 - input validation and schema enforcement
@@ -314,7 +313,7 @@ For MVP, a reasonable baseline is:
 
 - Paystack integration
 - webhook validation
-- Mailgun notifications
+- Resend notifications
 
 ### Phase 5 — Security and QA
 
@@ -335,10 +334,10 @@ For MVP, a reasonable baseline is:
 The best practical choice for this project is:
 
 - Next.js for frontend and API
-- PostgreSQL for the relational store
-- Prisma for migrations and data access
+- Supabase Database for the relational store
+- Supabase for migrations and data access
 - Paystack + webhook verification for payment processing
-- Mailgun abstraction for email notifications
+- Resend integration for email notifications
 - modular domain architecture rather than a monolith-first anti-pattern
 
 This is realistic for a small-to-medium business and keeps the system extensible without excessive complexity.

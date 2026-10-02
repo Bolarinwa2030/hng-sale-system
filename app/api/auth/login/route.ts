@@ -1,98 +1,36 @@
 import { NextResponse } from "next/server";
-import bcrypt from "bcryptjs";
 
-import { signAccessToken } from "@/lib/auth";
-import prisma from "@/lib/prisma";
+import { getSupabaseAuthClient } from "@/lib/supabase";
 import { loginSchema } from "@/lib/validators/auth";
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    const parsed = loginSchema.safeParse(body);
-
+    const parsed = loginSchema.safeParse(await request.json());
     if (!parsed.success) {
       return NextResponse.json(
-        {
-          success: false,
-          message: "Validation failed",
-          errors: parsed.error.flatten(),
-        },
+        { success: false, message: "Validation failed", errors: parsed.error.flatten() },
         { status: 400 }
       );
     }
 
-    const { email, password } = parsed.data;
-
-    if (!process.env.DATABASE_URL) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Database is not configured. Add DATABASE_URL to your environment.",
-        },
-        { status: 500 }
-      );
+    const { data, error } = await getSupabaseAuthClient().auth.signInWithPassword(parsed.data);
+    if (error) {
+      return NextResponse.json({ success: false, message: error.message }, { status: 401 });
     }
-
-    const user = await prisma.user.findUnique({
-      where: { email },
-      include: {
-        roles: {
-          include: {
-            role: true,
-          },
-        },
-      },
-    });
-
-    if (!user) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Invalid email or password.",
-        },
-        { status: 401 }
-      );
+    if (!data.session || !data.user) {
+      return NextResponse.json({ success: false, message: "No active session was created." }, { status: 401 });
     }
-
-    const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
-
-    if (!isPasswordValid) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Invalid email or password.",
-        },
-        { status: 401 }
-      );
-    }
-
-    const token = await signAccessToken({
-      sub: user.id,
-      email: user.email,
-      roles: user.roles.map((entry) => entry.role.name),
-    });
 
     return NextResponse.json({
       success: true,
-      token,
-      user: {
-        id: user.id,
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        phone: user.phone,
-        roles: user.roles.map((entry) => entry.role.name),
+      session: {
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
       },
+      user: data.user,
     });
   } catch (error) {
-    console.error("User login failed:", error);
-
-    return NextResponse.json(
-      {
-        success: false,
-        message: "Login failed.",
-      },
-      { status: 500 }
-    );
+    console.error("Supabase sign-in failed:", error);
+    return NextResponse.json({ success: false, message: "Unable to sign in." }, { status: 500 });
   }
 }

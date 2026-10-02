@@ -1,109 +1,43 @@
 import { NextResponse } from "next/server";
-import bcrypt from "bcryptjs";
 
-import { signAccessToken } from "@/lib/auth";
-import prisma from "@/lib/prisma";
+import { getSupabaseAuthClient } from "@/lib/supabase";
 import { registerSchema } from "@/lib/validators/auth";
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    const parsed = registerSchema.safeParse(body);
-
+    const parsed = registerSchema.safeParse(await request.json());
     if (!parsed.success) {
       return NextResponse.json(
-        {
-          success: false,
-          message: "Validation failed",
-          errors: parsed.error.flatten(),
-        },
+        { success: false, message: "Validation failed", errors: parsed.error.flatten() },
         { status: 400 }
       );
     }
 
     const { firstName, lastName, email, password, phone } = parsed.data;
-
-    if (!process.env.DATABASE_URL) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Database is not configured. Add DATABASE_URL to your environment.",
-        },
-        { status: 500 }
-      );
+    const { data, error } = await getSupabaseAuthClient().auth.signUp({
+      email,
+      password,
+      options: {
+        data: { first_name: firstName, last_name: lastName, phone: phone || "" },
+      },
+    });
+    if (error) {
+      return NextResponse.json({ success: false, message: error.message }, { status: 400 });
     }
 
-    const existingUser = await prisma.user.findUnique({ where: { email } });
-
-    if (existingUser) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "An account with this email already exists.",
-        },
-        { status: 409 }
-      );
-    }
-
-    const defaultRole = await prisma.role.upsert({
-      where: { name: "Sales Staff" },
-      update: {},
-      create: {
-        name: "Sales Staff",
-        description: "Default sales user role",
-      },
-    });
-
-    const user = await prisma.user.create({
-      data: {
-        firstName,
-        lastName,
-        email,
-        phone: phone || null,
-        passwordHash: await bcrypt.hash(password, 12),
-        roles: {
-          create: [{ roleId: defaultRole.id }],
-        },
-      },
-      include: {
-        roles: {
-          include: {
-            role: true,
-          },
-        },
-      },
-    });
-
-    const token = await signAccessToken({
-      sub: user.id,
-      email: user.email,
-      roles: user.roles.map((entry) => entry.role.name),
-    });
-
-    return NextResponse.json(
-      {
-        success: true,
-        token,
-        user: {
-          id: user.id,
-          email: user.email,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          phone: user.phone,
-          roles: user.roles.map((entry) => entry.role.name),
-        },
-      },
-      { status: 201 }
-    );
+    return NextResponse.json({
+      success: true,
+      requiresEmailConfirmation: !data.session,
+      session: data.session
+        ? {
+            access_token: data.session.access_token,
+            refresh_token: data.session.refresh_token,
+          }
+        : null,
+      user: data.user,
+    }, { status: 201 });
   } catch (error) {
-    console.error("User registration failed:", error);
-
-    return NextResponse.json(
-      {
-        success: false,
-        message: "Registration failed.",
-      },
-      { status: 500 }
-    );
+    console.error("Supabase registration failed:", error);
+    return NextResponse.json({ success: false, message: "Unable to register." }, { status: 500 });
   }
 }

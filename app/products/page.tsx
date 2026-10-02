@@ -2,9 +2,9 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { categories, products, type ShopProduct } from "@/lib/shop-data";
+import { categories, type ShopProduct } from "@/lib/shop-data";
 
 const CART_KEY = "mariam-market-cart";
 
@@ -22,11 +22,33 @@ function readCart(): Array<{ id: string; name: string; price: number; quantity: 
 }
 
 export default function ProductsPage() {
+  const [products, setProducts] = useState<ShopProduct[]>([]);
+  const [loadError, setLoadError] = useState("");
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [sortBy, setSortBy] = useState("featured");
   const [maxPrice, setMaxPrice] = useState(50000);
   const [visibleCount, setVisibleCount] = useState(8);
+
+  useEffect(() => {
+    async function loadProducts() {
+      try {
+        const response = await fetch("/api/products");
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+          throw new Error(result.message ?? "Unable to load products.");
+        }
+        setProducts(result.products ?? []);
+      } catch (error) {
+        setLoadError(error instanceof Error ? error.message : "Unable to load products.");
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadProducts();
+  }, []);
 
   const filteredProducts = useMemo(() => {
     const normalized = search.toLowerCase();
@@ -54,7 +76,7 @@ export default function ProductsPage() {
       default:
         return filtered;
     }
-  }, [search, selectedCategory, sortBy, maxPrice]);
+  }, [products, search, selectedCategory, sortBy, maxPrice]);
 
   const visibleProducts = filteredProducts.slice(0, visibleCount);
 
@@ -125,7 +147,13 @@ export default function ProductsPage() {
         <p>Max price: ₦ {maxPrice.toLocaleString()}</p>
       </div>
 
-      {filteredProducts.length ? (
+      {loading ? (
+        <div className="rounded-[28px] border border-slate-200 bg-white p-10 text-center text-slate-600 shadow-sm">
+          Loading products...
+        </div>
+      ) : loadError ? (
+        <div className="rounded-[28px] border border-rose-200 bg-rose-50 p-6 text-rose-700 shadow-sm">{loadError}</div>
+      ) : filteredProducts.length ? (
         <>
           <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
             {visibleProducts.map((product) => (
