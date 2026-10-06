@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { createBrowserSupabaseClient, getAuthRedirectUrl, hasSupabaseConfiguration } from "@/lib/supabase";
+import { createBrowserSupabaseClient, getRedirectToUrl, hasSupabaseConfiguration } from "@/lib/supabase";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -35,7 +35,7 @@ export default function RegisterPage() {
       const { error: signInError } = await client.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: getAuthRedirectUrl(),
+          redirectTo: getRedirectToUrl(),
         },
       });
 

@@ -14,6 +14,15 @@ export function getAuthRedirectUrl() {
   return process.env.NEXT_PUBLIC_AUTH_REDIRECT_URL ?? `${getSiteUrl().replace(/\/$/, "")}/orders`;
 }
 
+export function getRedirectToUrl() {
+  // OAuth redirect destination: the authenticated /orders page. After Google
+  // authenticates, the user is sent here so their Supabase session is
+  // established and they land on a page that shows authenticated content.
+  // Host-aware via getSiteUrl() so it works on localhost and on the Vercel
+  // production URL.
+  return new URL('/orders', getSiteUrl()).toString();
+}
+
 export function createBrowserSupabaseClient() {
   if (!supabaseUrl || !supabaseAnonKey) {
     throw new Error("Supabase is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY to your environment.");
@@ -24,6 +33,7 @@ export function createBrowserSupabaseClient() {
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
+      flowType: 'pkce',
     },
   });
 }

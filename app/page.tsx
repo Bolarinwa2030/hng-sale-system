@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { categories, type ShopProduct } from "@/lib/shop-data";
-import { createBrowserSupabaseClient, getAuthRedirectUrl, hasSupabaseConfiguration } from "@/lib/supabase";
+import { createBrowserSupabaseClient, getRedirectToUrl, hasSupabaseConfiguration } from "@/lib/supabase";
 
 const CART_KEY = "mariam-market-cart";
 
@@ -96,7 +96,7 @@ export default function HomePage() {
       const { error } = await client.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: getAuthRedirectUrl(),
+          redirectTo: getRedirectToUrl(),
         },
       });
 
